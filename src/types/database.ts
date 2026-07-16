@@ -810,6 +810,10 @@ export type Database = {
         Args: Record<PropertyKey, never>
         Returns: Json
       }
+      low_stock_assets: {
+        Args: Record<PropertyKey, never>
+        Returns: Database['public']['Tables']['assets']['Row'][]
+      }
       next_employee_number: {
         Args: Record<PropertyKey, never>
         Returns: string

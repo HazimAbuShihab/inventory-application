@@ -17,6 +17,25 @@ export function formatDate(value: string | null | undefined) {
   return new Intl.DateTimeFormat('en-US', { year: 'numeric', month: 'short', day: 'numeric' }).format(new Date(value))
 }
 
+export function todayIso() {
+  return new Date().toISOString().slice(0, 10)
+}
+
+export function addDaysIso(days: number) {
+  const date = new Date()
+  date.setDate(date.getDate() + days)
+  return date.toISOString().slice(0, 10)
+}
+
+/**
+ * Prepares user input for a PostgREST `.or()` ilike pattern: strips the
+ * characters that break the or() parser and escapes LIKE wildcards.
+ */
+export function toIlikeTerm(input: string) {
+  const cleaned = input.trim().replace(/[,()"]/g, ' ').replace(/[%_]/g, '\\$&').trim()
+  return cleaned ? `%${cleaned}%` : ''
+}
+
 export function downloadCsv(filename: string, rows: Record<string, unknown>[]) {
   if (!rows.length) return
   const headers = Object.keys(rows[0])

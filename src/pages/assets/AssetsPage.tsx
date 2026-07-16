@@ -7,6 +7,7 @@ import { LoadingState } from '@/components/common/LoadingState'
 import { MaterialIcon } from '@/components/common/MaterialIcon'
 import { PageHeader } from '@/components/common/PageHeader'
 import { StatusBadge } from '@/components/common/StatusBadge'
+import { TablePagination } from '@/components/common/TablePagination'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -26,10 +27,13 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { useAuth } from '@/contexts/AuthContext'
-import { useAssets, useDeleteAsset, type AssetWithCategory } from '@/hooks/useAssets'
+import { fetchAssets, useDeleteAsset, usePagedAssets, type AssetWithCategory } from '@/hooks/useAssets'
 import { useCategories } from '@/hooks/useCategories'
+import { useDebouncedValue } from '@/hooks/useDebouncedValue'
 import { ASSET_STATUSES, ASSET_TYPES, downloadCsv, formatCurrency, labelize } from '@/lib/utils'
 import type { AssetStatus, AssetType } from '@/types/database'
+
+const PAGE_SIZE = 25
 
 export default function AssetsPage() {
   const navigate = useNavigate()
@@ -40,42 +44,59 @@ export default function AssetsPage() {
   const [categoryId, setCategoryId] = useState('all')
   const [assetType, setAssetType] = useState<AssetType | 'all'>('all')
   const [status, setStatus] = useState<AssetStatus | 'all'>('all')
+  const [page, setPage] = useState(0)
   const [deleteTarget, setDeleteTarget] = useState<AssetWithCategory | null>(null)
 
+  const debouncedSearch = useDebouncedValue(search)
+
   const filters = useMemo(
-    () => ({ search, categoryId, assetType, status }),
-    [search, categoryId, assetType, status],
+    () => ({ search: debouncedSearch, categoryId, assetType, status }),
+    [debouncedSearch, categoryId, assetType, status],
   )
 
-  const { data: assets = [], isLoading, error } = useAssets(filters)
+  const { data, isLoading, error } = usePagedAssets(filters, page, PAGE_SIZE)
+  const assets = data?.rows ?? []
+  const totalCount = data?.totalCount ?? 0
   const deleteMutation = useDeleteAsset()
+
+  function updateFilter<T>(setter: (value: T) => void) {
+    return (value: T) => {
+      setter(value)
+      setPage(0)
+    }
+  }
 
   function isLowStock(asset: AssetWithCategory) {
     return asset.asset_type === 'disposable' && asset.quantity <= asset.minimum_stock_level
   }
 
-  function handleExport() {
-    if (!assets.length) {
-      toast.error('No assets to export')
-      return
-    }
+  async function handleExport() {
+    try {
+      const allAssets = await fetchAssets(filters)
+      if (!allAssets.length) {
+        toast.error('No assets to export')
+        return
+      }
 
-    downloadCsv(
-      `assets-${new Date().toISOString().slice(0, 10)}.csv`,
-      assets.map((asset) => ({
-        asset_code: asset.asset_code,
-        name: asset.name,
-        category: asset.category?.name ?? '',
-        asset_type: asset.asset_type,
-        status: asset.status,
-        serial_number: asset.serial_number ?? '',
-        quantity: asset.quantity,
-        minimum_stock_level: asset.minimum_stock_level,
-        location: asset.location ?? '',
-        purchase_price: asset.purchase_price ?? '',
-      })),
-    )
-    toast.success('Assets exported to CSV')
+      downloadCsv(
+        `assets-${new Date().toISOString().slice(0, 10)}.csv`,
+        allAssets.map((asset) => ({
+          asset_code: asset.asset_code,
+          name: asset.name,
+          category: asset.category?.name ?? '',
+          asset_type: asset.asset_type,
+          status: asset.status,
+          serial_number: asset.serial_number ?? '',
+          quantity: asset.quantity,
+          minimum_stock_level: asset.minimum_stock_level,
+          location: asset.location ?? '',
+          purchase_price: asset.purchase_price ?? '',
+        })),
+      )
+      toast.success('Assets exported to CSV')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to export assets')
+    }
   }
 
   async function handleDelete() {
@@ -234,11 +255,11 @@ export default function AssetsPage() {
           <Input
             placeholder="Search assets..."
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => updateFilter(setSearch)(e.target.value)}
             className="bg-slate-50 pl-10"
           />
         </div>
-        <Select value={categoryId} onValueChange={setCategoryId}>
+        <Select value={categoryId} onValueChange={updateFilter(setCategoryId)}>
           <SelectTrigger className="w-full sm:w-[180px]">
             <SelectValue placeholder="Category" />
           </SelectTrigger>
@@ -251,7 +272,7 @@ export default function AssetsPage() {
             ))}
           </SelectContent>
         </Select>
-        <Select value={assetType} onValueChange={(v) => setAssetType(v as AssetType | 'all')}>
+        <Select value={assetType} onValueChange={(v) => updateFilter(setAssetType)(v as AssetType | 'all')}>
           <SelectTrigger className="w-full sm:w-[160px]">
             <SelectValue placeholder="Type" />
           </SelectTrigger>
@@ -264,7 +285,7 @@ export default function AssetsPage() {
             ))}
           </SelectContent>
         </Select>
-        <Select value={status} onValueChange={(v) => setStatus(v as AssetStatus | 'all')}>
+        <Select value={status} onValueChange={(v) => updateFilter(setStatus)(v as AssetStatus | 'all')}>
           <SelectTrigger className="w-full sm:w-[160px]">
             <SelectValue placeholder="Status" />
           </SelectTrigger>
@@ -298,6 +319,12 @@ export default function AssetsPage() {
               </Button>
             ) : undefined
           }
+        />
+        <TablePagination
+          page={page}
+          pageSize={PAGE_SIZE}
+          totalCount={totalCount}
+          onPageChange={setPage}
         />
       </div>
 

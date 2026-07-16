@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 
 import { supabase } from '@/lib/supabase'
+import { addDaysIso, todayIso } from '@/lib/utils'
 import type { CategoryDomain, DashboardStats, Tables } from '@/types/database'
 
 export const dashboardKeys = {
@@ -65,16 +66,6 @@ export type EmployeeActivityItem = {
   date: string
 }
 
-function todayIso() {
-  return new Date().toISOString().slice(0, 10)
-}
-
-function addDaysIso(days: number) {
-  const date = new Date()
-  date.setDate(date.getDate() + days)
-  return date.toISOString().slice(0, 10)
-}
-
 export function useDashboardStats() {
   return useQuery({
     queryKey: dashboardKeys.stats(),
@@ -91,15 +82,13 @@ export function useLowStockAssets(enabled: boolean) {
     queryKey: dashboardKeys.lowStock(),
     enabled,
     queryFn: async () => {
+      // RPC pushes the quantity <= minimum_stock_level comparison to the database
       const { data, error } = await supabase
-        .from('assets')
+        .rpc('low_stock_assets')
         .select('*, category:asset_categories(name)')
-        .eq('asset_type', 'disposable')
-        .order('quantity', { ascending: true })
 
       if (error) throw error
-
-      return (data as LowStockAsset[]).filter((asset) => asset.quantity <= asset.minimum_stock_level)
+      return data as unknown as LowStockAsset[]
     },
   })
 }

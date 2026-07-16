@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 
 import { supabase } from '@/lib/supabase'
+import { addDaysIso, todayIso } from '@/lib/utils'
 import type { Tables } from '@/types/database'
 
 export const reportKeys = {
@@ -97,16 +98,6 @@ export type MaintenanceCostSummary = {
   asset_name: string
   record_count: number
   total_cost: number
-}
-
-function todayIso() {
-  return new Date().toISOString().slice(0, 10)
-}
-
-function addDaysIso(days: number) {
-  const date = new Date()
-  date.setDate(date.getDate() + days)
-  return date.toISOString().slice(0, 10)
 }
 
 function countByField<T>(items: T[], getKey: (item: T) => string) {

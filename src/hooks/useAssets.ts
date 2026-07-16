@@ -1,6 +1,7 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { supabase } from '@/lib/supabase'
+import { toIlikeTerm } from '@/lib/utils'
 import type {
   AssetStatus,
   AssetType,
@@ -14,6 +15,8 @@ export const assetKeys = {
   all: ['assets'] as const,
   lists: () => [...assetKeys.all, 'list'] as const,
   list: (filters: AssetFilters) => [...assetKeys.lists(), filters] as const,
+  page: (filters: AssetFilters, page: number, pageSize: number) =>
+    [...assetKeys.lists(), filters, page, pageSize] as const,
   details: () => [...assetKeys.all, 'detail'] as const,
   detail: (id: string) => [...assetKeys.details(), id] as const,
 }
@@ -40,41 +43,58 @@ export type AssetDetail = Tables<'assets'> & {
   transactions: Tables<'asset_transactions'>[]
 }
 
+function buildAssetQuery(filters: AssetFilters, withCount: boolean) {
+  let query = supabase
+    .from('assets')
+    .select('*, category:asset_categories(*)', withCount ? { count: 'exact' } : undefined)
+    .order('created_at', { ascending: false })
+
+  if (filters.categoryId && filters.categoryId !== 'all') {
+    query = query.eq('category_id', filters.categoryId)
+  }
+  if (filters.assetType && filters.assetType !== 'all') {
+    query = query.eq('asset_type', filters.assetType)
+  }
+  if (filters.status && filters.status !== 'all') {
+    query = query.eq('status', filters.status)
+  }
+  if (filters.search?.trim()) {
+    const term = toIlikeTerm(filters.search)
+    if (term) {
+      query = query.or(`name.ilike.${term},asset_code.ilike.${term},serial_number.ilike.${term}`)
+    }
+  }
+
+  return query
+}
+
+export async function fetchAssets(filters: AssetFilters = {}) {
+  const { data, error } = await buildAssetQuery(filters, false)
+  if (error) throw error
+  return data as AssetWithCategory[]
+}
+
 export function useAssets(filters: AssetFilters = {}) {
   return useQuery({
     queryKey: assetKeys.list(filters),
+    queryFn: () => fetchAssets(filters),
+  })
+}
+
+export type PagedAssets = {
+  rows: AssetWithCategory[]
+  totalCount: number
+}
+
+export function usePagedAssets(filters: AssetFilters, page: number, pageSize = 25) {
+  return useQuery({
+    queryKey: assetKeys.page(filters, page, pageSize),
+    placeholderData: keepPreviousData,
     queryFn: async () => {
-      let query = supabase
-        .from('assets')
-        .select('*, category:asset_categories(*)')
-        .order('created_at', { ascending: false })
-
-      if (filters.categoryId && filters.categoryId !== 'all') {
-        query = query.eq('category_id', filters.categoryId)
-      }
-      if (filters.assetType && filters.assetType !== 'all') {
-        query = query.eq('asset_type', filters.assetType)
-      }
-      if (filters.status && filters.status !== 'all') {
-        query = query.eq('status', filters.status)
-      }
-
-      const { data, error } = await query
+      const from = page * pageSize
+      const { data, error, count } = await buildAssetQuery(filters, true).range(from, from + pageSize - 1)
       if (error) throw error
-
-      let assets = data as AssetWithCategory[]
-
-      if (filters.search?.trim()) {
-        const term = filters.search.trim().toLowerCase()
-        assets = assets.filter(
-          (asset) =>
-            asset.name.toLowerCase().includes(term) ||
-            asset.asset_code.toLowerCase().includes(term) ||
-            (asset.serial_number?.toLowerCase().includes(term) ?? false),
-        )
-      }
-
-      return assets
+      return { rows: data as AssetWithCategory[], totalCount: count ?? 0 } satisfies PagedAssets
     },
   })
 }
