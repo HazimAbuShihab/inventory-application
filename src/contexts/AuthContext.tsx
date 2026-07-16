@@ -9,6 +9,8 @@ import {
   type ReactNode,
 } from 'react'
 
+import { toast } from 'sonner'
+
 import { supabase } from '@/lib/supabase'
 import type { UserProfile, UserRole } from '@/types/database'
 
@@ -57,6 +59,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const loadProfile = useCallback(async (userId: string) => {
     const userProfile = await fetchProfile(userId)
+
+    // Suspended/inactive accounts must not keep an authenticated session
+    if (userProfile && userProfile.status !== 'active') {
+      await supabase.auth.signOut()
+      setProfile(null)
+      setSession(null)
+      toast.error('Your account is not active. Contact your administrator.')
+      return
+    }
+
     setProfile(userProfile)
   }, [])
 
