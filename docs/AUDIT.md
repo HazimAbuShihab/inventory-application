@@ -78,10 +78,45 @@ database) or **[RECOMMENDATION]** (needs a decision or dashboard access).
 | A4 | No deployment/env documentation. | [FIXED] README rewrite + `docs/DEPLOYMENT.md` |
 | A5 | Duplicated date helpers (`todayIso`/`addDaysIso` in two hooks). | [FIXED] extracted to `lib/utils` |
 
-## 5. Remaining recommendations
+## 5. Security verification (empirical penetration tests)
 
-1. Enable leaked-password protection and (optionally) MFA in the Supabase dashboard (S8).
-2. Rotate the demo account passwords before inviting real users (F2).
-3. Move report aggregation into SQL views once data volume grows (P10).
-4. Add Sentry (or similar) error monitoring for production.
-5. Consider `@tanstack/react-virtual` for tables if page sizes above ~100 rows are ever needed.
+Each fix was verified against the **live database** by simulating the attacker's
+role (via `SET ROLE authenticated` + a forged `request.jwt.claims`) and attempting
+the exploit. All write attempts were wrapped in always-rollback blocks so no data
+was mutated. Results:
+
+| Attack attempted | Result |
+|------------------|--------|
+| `facilities_admin` demotes `super_admin` to employee (S1) | **BLOCKED** — 0 rows |
+| `inventory_admin` self-escalates to `super_admin` | **BLOCKED** — RLS policy violation |
+| `employee` promotes own role to `inventory_admin` | **BLOCKED** — RLS policy violation |
+| `employee` re-activates / changes own `status` (S4) | **BLOCKED** — RLS policy violation |
+| `employee` edits price/name on assigned asset (S2) | **BLOCKED** — column-guard trigger |
+| `employee` changes *status* on assigned asset (legit) | **ALLOWED** — 1 row (no regression) |
+| `employee` forges an audit-log row (S3) | **BLOCKED** — RLS policy violation |
+| `facilities_admin` writes an IT-domain asset (domain isolation) | **BLOCKED** — RLS policy violation |
+| `employee` reads `users` / `assets` / `audit_logs` / `distributions` | **1 / 1 / 0 / 0** (own data only) |
+| `anon` (unauthenticated) reads any table | **0 rows** everywhere |
+
+Schema-wide checks: every `public` table has RLS **enabled** with at least one policy,
+and **no** `SECURITY DEFINER` function is executable by the `anon` role.
+
+> Note: an earlier iteration of the test harness accidentally committed a few writes
+> as the RLS-bypassing service role (a harness bug, not an app vulnerability). Those
+> mutations were detected and fully reverted; the database was confirmed pristine
+> afterward (correct seed roles/statuses restored, no forged or tampered rows remain).
+
+## 6. Remaining recommendations
+
+1. **Enable leaked-password protection** (and optionally MFA) in the Supabase dashboard —
+   Authentication → Passwords. This is the only outstanding security-advisor item and
+   cannot be toggled via API/MCP (S8).
+2. The 7 `SECURITY DEFINER` functions flagged by the advisor were each reviewed: the
+   `admin_*`, `activate/deactivate_employee`, and `next_employee_number` functions
+   enforce a role check on their first lines; `current_user_role` and
+   `get_dashboard_stats` intentionally scope their output to the caller. All are safe
+   as-is — the advisor is a "please review" heuristic, not a confirmed finding.
+3. Rotate the demo account passwords before inviting real users (F2).
+4. Move report aggregation into SQL views once data volume grows (P10).
+5. Add Sentry (or similar) error monitoring for production.
+6. Consider `@tanstack/react-virtual` for tables if page sizes above ~100 rows are ever needed.
